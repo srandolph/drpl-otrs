@@ -47,3 +47,43 @@ function nodejs_schema() {
   );
 }
 
+/**
+ * Implements hook_requirements()
+ */
+function nodejs_requirements($phase) {
+  if ($phase == 'runtime') {
+
+    $result = array();
+    $requirements['nodejs'] = array(
+      'title' => t('Node.js'),
+      'description' => t('Can Drupal connect to the Node.js server?'),
+    );
+
+    // Initiate a call to the Nodejs server
+    // and react to the response.
+    $message = new StdClass;
+    $response = Nodejs::sendMessage($message);
+
+    // drupal_http_request does the work for us so we just check to see
+    // if it is an error or not and report back
+    // $response->error: If an error occurred, the error message. Otherwise not set. 
+    if (isset($response->error)) {
+      $result = array(
+        'value' => check_plain($response->error),
+        'severity' => REQUIREMENT_ERROR,
+      );
+    }
+    else {
+      $result = array(
+        'value' => check_plain($response->status_message),
+        'severity' => REQUIREMENT_OK,
+      );
+    }
+
+    // Merge the result from Nodejs
+    $requirements['nodejs'] += $result;
+
+  return $requirements;
+  }
+}
+

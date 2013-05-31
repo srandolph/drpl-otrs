@@ -9,6 +9,34 @@
    	  drupalchat_message: drupalchat.send_current_message 
 	});
   };
+
+  Drupal.drupalchat.parseHTML = function(text) {
+    var patt = /\b(http:\/\/|https:\/\/|ftp:\/\/|file:\/\/)?(www\.|ftp\.)?[A-Za-z0-9]+[-A-Z0-9@\/_$.]*(\.ac|\.ad|\.ae|\.aero|\.af|\.ag|\.ai|\.al|\.am|\.an|\.ao|\.aq|\.ar|\.arpa|\.as|\.asia|\.at|\.au|\.aw|\.ax|\.az|\.ba|\.bb|\.bd|\.be|\.bf|\.bg|\.bh|\.bi|\.biz|\.bj|\.bm|\.bn|\.bo|\.br|\.bs|\.bt|\.bv|\.bw|\.by|\.bz|\.ca|\.cat|\.cc|\.cd|\.cf|\.cg|\.ch|\.ci|\.ck|\.cl|\.cm|\.cn|\.co|\.com|\.coop|\.cr|\.cu|\.cv|\.cw|\.cx|\.cy|\.cz|\.de|\.dj|\.dk|\.dm|\.do|\.dz|\.ec|\.edu|\.ee|\.eg|\.er|\.es|\.et|\.eu|\.fi|\.fj|\.fk|\.fm|\.fo|\.fr|\.ga|\.gb|\.gd|\.ge|\.gf|\.gg|\.gh|\.gi|\.gl|\.gm|\.gn|\.gov|\.gp|\.gq|\.gr|\.gs|\.gt|\.gu|\.gw|\.gy|\.hk|\.hm|\.hn|\.hr|\.ht|\.hu|\.id|\.ie|\.il|\.im|\.in|\.info|\.int|\.io|\.iq|\.ir|\.is|\.it|\.je|\.jm|\.jo|\.jobs|\.jp|\.ke|\.kg|\.kh|\.ki|\.km|\.kn|\.kp|\.kr|\.kw|\.ky|\.kz|\.la|\.lb|\.lc|\.li|\.lk|\.lr|\.ls|\.lt|\.lu|\.lv|\.ly|\.ma|\.mc|\.md|\.me|\.mg|\.mh|\.mil|\.mk|\.ml|\.mm|\.mn|\.mo|\.mobi|\.mp|\.mq|\.mr|\.ms|\.mt|\.mu|\.museum|\.mv|\.mw|\.mx|\.my|\.mz|\.na|\.name|\.nc|\.ne|\.net|\.nf|\.ng|\.ni|\.nl|\.no|\.np|\.nr|\.nu|\.nz|\.om|\.org|\.pa|\.pe|\.pf|\.pg|\.ph|\.pk|\.pl|\.pm|\.pn|\.pr|\.pro|\.ps|\.pt|\.pw|\.py|\.qa|\.re|\.ro|\.rs|\.ru|\.rw|\.sa|\.sb|\.sc|\.sd|\.se|\.sg|\.sh|\.si|\.sj|\.sk|\.sl|\.sm|\.sn|\.so|\.sr|\.st|\.su|\.sv|\.sx|\.sy|\.sz|\.tc|\.td|\.tel|\.tf|\.tg|\.th|\.tj|\.tk|\.tl|\.tm|\.tn|\.to|\.tp|\.tr|\.travel|\.tt|\.tv|\.tw|\.tz|\.ua|\.ug|\.uk|\.us|\.uy|\.uz|\.va|\.vc|\.ve|\.vg|\.vi|\.vn|\.vu|\.wf|\.ws|\.xn|\.xxx|\.ye|\.yt|\.za|\.zm|\.zw)([-._~:\/?#\[\]@!$&'\(\)\*\+,;=][A-Za-z0-9\.\/\+&@#%=~_|]*)*\b/ig;
+    var a = text.match(patt);
+    var pos= 0,final_string = "",prefix = "";
+    if (a)
+    {
+        for(var i =0 ; i < a.length ;i++)
+        {
+            pos= text.indexOf(a[i]) + a[i].length;
+            prefix = "";
+            if(pos > text.length)
+            {   pos = text.length}
+            if(!(a[i].indexOf("http://") == 0 || a[i].indexOf("https://") == 0))
+            {
+                prefix = "http://";
+            }
+            final_string  = final_string + text.substring(0,pos).replace(a[i], "<a target = '_blank' href='" + prefix + a[i] + "'>" + a[i] + "</a>" );
+            text = text.substring(pos,text.length);
+        }
+        if(text.length != 0)
+        {
+            final_string = final_string + text;
+        }
+        return final_string;
+    }
+    return text;
+  };
   
   Drupal.drupalchat.checkChatBoxInputKey = function(event, chatboxtextarea, chatboxtitle) {
     if(event.keyCode == 13 && event.shiftKey == 0)  {
@@ -52,6 +80,7 @@
           Drupal.drupalchat.sendMessages();
         }
         message = message.replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;");
+        message = Drupal.drupalchat.parseHTML(message);
         message = emotify(message);
         if (jQuery("#chatbox_"+chatboxtitle+" .chatboxcontent .chatboxusername a:last").html() == Drupal.settings.drupalchat.username) {
           jQuery("#chatbox_"+chatboxtitle+" .chatboxcontent").append('<p class=\''+drupalchat.send_current_message_id+'\'>'+message+'</p>');
@@ -592,7 +621,8 @@ function processChatData(data) {
 			  return;
             }			  
 			value.message = value.message.replace(/{{drupalchat_newline}}/g,"<br />");
-			value.message = emotify(value.message);
+			value.message = Drupal.drupalchat.parseHTML(value.message);
+            value.message = emotify(value.message);
 			if (jQuery("#chatbox_"+chatboxtitle+" .chatboxcontent .chatboxusername a:last").html() == value.name) {
 				jQuery("#chatbox_"+chatboxtitle+" .chatboxcontent").append('<p class="' + value.message_id + '">'+value.message+'</p>');
 			}

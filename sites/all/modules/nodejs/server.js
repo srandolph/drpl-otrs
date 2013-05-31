@@ -1,7 +1,5 @@
 /**
  * Provides Node.js - Drupal integration.
- *
- * This code is beta quality.
  */
 
 var request = require('request'),
@@ -33,6 +31,7 @@ var channels = {},
       addUserToChannelUrl: 'user/channel/add/:channel/:uid',
       removeUserFromChannelUrl: 'user/channel/remove/:channel/:uid',
       addChannelUrl: 'channel/add/:channel',
+      checkChannelUrl: 'channel/check/:channel',
       removeChannelUrl: 'channel/remove/:channel',
       setUserPresenceListUrl: 'user/presence-list/:uid/:uidList',
       addAuthTokenToChannelUrl: 'authtoken/channel/add/:channel/:uid',
@@ -51,8 +50,10 @@ var channels = {},
         host: 'localhost',
         scheme: 'http',
         port: 80,
-        basePath: '',
-        messagePath: '/nodejs/message'
+        basePath: '/',
+        strictSSL: false,
+        messagePath: 'nodejs/message',
+        httpAuth: ''
       },
       logLevel: 1
     },
@@ -97,6 +98,38 @@ for (var i in settings.extensions) {
 }
 
 /**
+ * Invokes the specified function on all registered server extensions.
+ */
+var invokeExtensions = function (hook) {
+  var args = arguments.length ? Array.prototype.slice.call(arguments, 1) : [];
+  var returnValues = {};
+  for (var i in extensions) {
+    if (extensions[i].hasOwnProperty(hook) && extensions[i][hook].apply) {
+      returnValues[i] = extensions[i][hook].apply(this, args);
+    }
+  }
+  return returnValues;
+}
+
+/**
+ * Define a configuration object to pass to all server extensions at
+ * initialization. The extensions do not have access to this namespace,
+ * so we provide them with references.
+ */
+var extensionsConfig = {
+  'publishMessageToChannel': publishMessageToChannel,
+  'publishMessageToClient': publishMessageToClient,
+  'addClientToChannel': addClientToChannel,
+  'settings': settings,
+  'channels': channels,
+  'io': io,
+  'tokenChannels': tokenChannels,
+  'authenticatedClients': authenticatedClients,
+  'request': request,
+  'sendMessageToBackend': sendMessageToBackend
+};
+
+/**
  * Check if the given channel is client-writable.
  */
 var channelIsClientWritable = function (channel) {
@@ -111,7 +144,14 @@ var channelIsClientWritable = function (channel) {
  */
 var getBackendUrl = function () {
   return settings.backend.scheme + '://' + settings.backend.host + ':' +
-         settings.backend.port + settings.backend.messagePath;
+         settings.backend.port + settings.backend.basePath + settings.backend.messagePath;
+}
+
+var getAuthHeader = function() {
+  if (settings.backend.httpAuth.length > 0) {
+    return 'Basic ' + new Buffer(settings.backend.httpAuth).toString('base64');
+  }
+  return false;
 }
 
 /**
@@ -124,12 +164,21 @@ var sendMessageToBackend = function (message, callback) {
   });
 
   var options = {
-    uri: settings.backend.scheme + '://' + settings.backend.host + ':' + settings.backend.port + settings.backend.messagePath,
+    uri: getBackendUrl(),
     body: requestBody,
     headers: {
       'Content-Length': Buffer.byteLength(requestBody),
       'Content-Type': 'application/x-www-form-urlencoded'
     }
+  }
+
+  if (settings.backend.scheme == 'https') {
+     options.strictSSL = settings.backend.strictSSL;
+  }
+
+  var httpAuthHeader = getAuthHeader();
+  if (httpAuthHeader !== false) {
+    options.headers.Authorization = httpAuthHeader;
   }
 
   if (settings.debug) {
@@ -257,11 +306,17 @@ var getContentTokenUsers = function (request, response) {
   request.on('end', function () {
     try {
       var channel = JSON.parse(requestBody);
-      response.send({users: getContentTokenChannelUsers(channel.channel)});
     }
     catch (exception) {
       console.log('getContentTokensUsers: Invalid JSON "' + requestBody + '"', exception);
       response.send({error: 'Invalid JSON, error: ' + exception.toString()});
+    }
+    try {
+      response.send({users: getContentTokenChannelUsers(channel.channel)});
+    }
+    catch (exception) {
+      console.log('getContentTokensUsers:', exception);
+      response.send({error: 'Error calling getContentTokenChannelUsers() for channel "' + channel.channel + '", error: ' + exception.toString()});
     }
   });
 }
@@ -455,11 +510,7 @@ var logoutUser = function (request, response) {
     // Destroy any socket connections associated with this authToken.
     for (var clientId in io.sockets.sockets) {
       if (io.sockets.sockets[clientId].authToken == authToken) {
-        delete io.sockets.sockets[clientId];
-        // Delete any channel entries for this clientId.
-        for (var channel in channels) {
-          delete channels[channel].sessionIds[clientId];
-        }
+        cleanupSocket(io.sockets.sockets[clientId]);
       }
     }
     response.send({'status': 'success'});
@@ -616,7 +667,7 @@ var addAuthTokenToChannel = function (request, response) {
  */
 var addClientToChannel = function (sessionId, channel) {
   if (sessionId && channel) {
-    if (!/^[0-9]+$/.test(sessionId) || !io.sockets.sockets.hasOwnProperty(sessionId)) {
+    if (!/^[0-9a-z_-]+$/i.test(sessionId) || !io.sockets.sockets.hasOwnProperty(sessionId)) {
       console.log("addClientToChannel: Invalid sessionId: " + sessionId);
     }
     else if (!/^[a-z0-9_]+$/i.test(channel)) {
@@ -688,6 +739,33 @@ var addChannel = function (request, response) {
       console.log("Successfully added channel '" + channel + "'");
     }
     response.send({'status': 'success'});
+  }
+  else {
+    console.log("Missing channel");
+    response.send({'status': 'failed', 'error': 'Invalid data: missing channel'});
+  }
+}
+
+/**
+ * Checks whether a channel exists.
+ */
+var checkChannel = function (request, response) {
+  var channel = request.params.channel || '';
+  if (channel) {
+    if (!/^[a-z0-9_]+$/i.test(channel)) {
+      console.log('Invalid channel: ' + channel);
+      response.send({'status': 'failed', 'error': 'Invalid channel name.'});
+      return;
+    }
+    if (channels[channel]) {
+      console.log("Channel name '" + channel + "' is active on the server.");
+      response.send({'status': 'success', 'result': true});
+      return;
+    }
+    else {
+      console.log("Channel name '" + channel + "' is not active on the server.");
+      response.send({'status': 'success', 'result': false});
+    }
   }
   else {
     console.log("Missing channel");
@@ -796,7 +874,7 @@ var removeAuthTokenFromChannel = function (request, response) {
  */
 var removeClientFromChannel = function (sessionId, channel) {
   if (sessionId && channel) {
-    if (!/^[0-9]+$/.test(sessionId) || !io.sockets.sockets.hasOwnProperty(sessionId)) {
+    if (!/^[0-9a-z_-]+$/i.test(sessionId) || !io.sockets.sockets.hasOwnProperty(sessionId)) {
       console.log("removeClientFromChannel: Invalid sessionId: " + sessionId);
     }
     else if (!/^[a-z0-9_]+$/i.test(channel) || !channels.hasOwnProperty(channel)) {
@@ -1014,6 +1092,8 @@ var setupClientConnection = function (sessionId, authData, contentTokens) {
   }
 };
 
+invokeExtensions('setup', extensionsConfig);
+
 var server;
 if (settings.scheme == 'https') {
   var sslOptions = {
@@ -1035,12 +1115,24 @@ server.get(settings.baseAuthPath + settings.logoutUserUrl, logoutUser);
 server.get(settings.baseAuthPath + settings.addUserToChannelUrl, addUserToChannel);
 server.get(settings.baseAuthPath + settings.removeUserFromChannelUrl, removeUserFromChannel);
 server.get(settings.baseAuthPath + settings.addChannelUrl, addChannel);
+server.get(settings.baseAuthPath + settings.checkChannelUrl, checkChannel);
 server.get(settings.baseAuthPath + settings.removeChannelUrl, removeChannel);
 server.get(settings.baseAuthPath + settings.setUserPresenceListUrl, setUserPresenceList);
 server.post(settings.baseAuthPath + settings.toggleDebugUrl, toggleDebug);
 server.post(settings.baseAuthPath + settings.getContentTokenUsersUrl, getContentTokenUsers);
 server.post(settings.baseAuthPath + settings.contentTokenUrl, setContentToken);
 server.post(settings.baseAuthPath + settings.publishMessageToContentChannelUrl, publishMessageToContentChannel);
+
+// Allow extensions to add routes.
+for (var i in extensions) {
+  if (extensions[i].hasOwnProperty('routes')) {
+    console.log('Adding route handlers from extension', extensions[i].routes);
+    for (var j = 0; j < extensions[i].routes.length; j++) {
+      server.get(extensions[i].routes[j].path, extensions[i].routes[j].handler);
+    }
+  }
+}
+
 server.get('*', send404);
 server.listen(settings.port, settings.host);
 console.log('Started ' + settings.scheme + ' server.');
@@ -1058,8 +1150,6 @@ io.configure(function () {
 });
 
 io.sockets.on('connection', function(socket) {
-  process.emit('client-connection', socket.id);
-
   socket.on('authenticate', function(message) {
     if (settings.debug) {
       console.log('Authenticating client with key "' + message.authToken + '"');
@@ -1087,7 +1177,7 @@ io.sockets.on('connection', function(socket) {
 
       // No channel, so this message is destined for one or more clients. Check
       // that this is allowed in the server configuration.
-      if (settings.clientsCanWriteToClients) {
+      else if (settings.clientsCanWriteToClients) {
         process.emit('client-message', socket.id, message);
       }
       else if (settings.debug) {
@@ -1105,35 +1195,6 @@ io.sockets.on('connection', function(socket) {
 .on('error', function(exception) {
   console.log('Socket error [' + exception + ']');
 });
-
-/**
- * Invokes the specified function on all registered server extensions.
- */
-var invokeExtensions = function (hook) {
-  var args = arguments.length ? Array.prototype.slice.call(arguments, 1) : [];
-  for (var i in extensions) {
-    if (extensions[i].hasOwnProperty(hook) && extensions[i][hook].apply) {
-      extensions[i][hook].apply(this, args);
-    }
-  }
-}
-
-/**
- * Define a configuration object to pass to all server extensions at
- * initialization. The extensions do not have access to this namespace,
- * so we provide them with references.
- */
-var extensionsConfig = {
-  'publishMessageToChannel': publishMessageToChannel,
-  'publishMessageToClient': publishMessageToClient,
-  'addClientToChannel': addClientToChannel,
-  'settings': settings,
-  'channels': channels,
-  'io': io,
-  'tokenChannels': tokenChannels,
-  'sendMessageToBackend': sendMessageToBackend
-};
-invokeExtensions('setup', extensionsConfig);
 
 // vi:ai:expandtab:sw=2 ts=2
 

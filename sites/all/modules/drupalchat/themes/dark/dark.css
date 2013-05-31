@@ -321,6 +321,10 @@
   margin: 0 4px;
   text-align: left;
 }
+#drupalchat .chatboxcontent p a {
+  border: none !important;
+  color: #00e; !important;
+}
 .drupalchat_userOffline {
   background-color: #fff;
   color: #C00;

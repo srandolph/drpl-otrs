@@ -668,6 +668,11 @@ function _name_field_settings_pre_render($form) {
         '#suffix' => '</tr>',
         '#weight' => 2,
       ),
+      'allow_family_or_given' => array(
+        '#prefix' => '<tr><td>&nbsp;</td><td colspan="6">',
+        '#suffix' => '</td></tr>',
+        '#weight' => 2.1,
+      ),
       'max_length' => array(
         '#prefix' => '<tr><td><strong>' . t('Maximum length') . '<sup>3</sup></strong></td>',
         '#suffix' => '</tr>',
@@ -708,6 +713,9 @@ function _name_field_settings_pre_render($form) {
       '#weight' => 2,
     ),
   );
+
+  $form['field_properties']['tbody']['allow_family_or_given']['checkbox'] = $form['allow_family_or_given'];
+  unset($form['allow_family_or_given']);
 
   $i = 0;
   foreach (_name_translations() as $key => $title) {

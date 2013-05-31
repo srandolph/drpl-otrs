@@ -12,9 +12,7 @@ Drupal.Nodejs = Drupal.Nodejs || {
 Drupal.behaviors.nodejs = {
   attach: function (context, settings) {
     if (!Drupal.Nodejs.socket) {
-      if (Drupal.Nodejs.connect()) {
-        Drupal.Nodejs.sendAuthMessage();
-      }
+      Drupal.Nodejs.connect();
     }
   }
 };
@@ -93,8 +91,6 @@ Drupal.Nodejs.connect = function () {
   Drupal.Nodejs.socket.on('connect', function() {
     Drupal.Nodejs.sendAuthMessage();
     Drupal.Nodejs.runSetupHandlers('connect');
-    Drupal.Nodejs.socket.on('message', Drupal.Nodejs.runCallbacks);
-
     if (Drupal.ajax != undefined) {
       // Monkey-patch Drupal.ajax.prototype.beforeSerialize to auto-magically
       // send sessionId for AJAX requests so we can exclude the current browser
@@ -107,6 +103,9 @@ Drupal.Nodejs.connect = function () {
       };
     }
   });
+
+  Drupal.Nodejs.socket.on('message', Drupal.Nodejs.runCallbacks);
+
   Drupal.Nodejs.socket.on('disconnect', function() {
     Drupal.Nodejs.runSetupHandlers('disconnect');
     if (Drupal.ajax != undefined) {

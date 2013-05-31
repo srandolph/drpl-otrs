@@ -67,8 +67,8 @@ function name_token_info() {
     ),
   );
 
-  foreach (name_token_types_chained(NULL, TRUE) as $entity_type => $tokens) {
-    $token_info['tokens'][$entity_type] = $tokens;
+  foreach (name_token_types_chained(NULL, TRUE) as $token_type => $tokens) {
+    $token_info['tokens'][$token_type] = $tokens;
   }
 
   return $token_info;
@@ -274,7 +274,11 @@ function name_token_types_chained($type = NULL, $reset = FALSE) {
             else {
               $description = t('Name field in the default format. Also known as %labels', array('%labels' => implode(', ', $labels)));
             }
-            $types[$entity_type]['name-' . $clean] = array(
+
+            // Make sure we get the correct token type.
+            $entity_info = entity_get_info($entity_type);
+            $token_type = isset($entity_info['token type']) ? $entity_info['token type'] : $entity_type;
+            $types[$token_type]['name-' . $clean] = array(
               'name' => check_plain($label),
               'description' => $description,
               'type' => 'name-field',

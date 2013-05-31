@@ -86,7 +86,7 @@ function nodejs_config_form($form, &$form_state) {
     '#title' => 'Publish URL',
     '#required' => TRUE,
     '#description' => 'http path on which the node.js server should accept messages from the Drupal site.',
-    '#default_value' => variable_get('nodejs_config_publishUrl', base_path() . 'nodejs/publish'),
+    '#default_value' => variable_get('nodejs_config_publishUrl', 'publish'),
   );
   $form['config']['nodejs_service_key'] = array(
     '#type' => 'textfield',

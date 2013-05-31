@@ -22,9 +22,9 @@ dependencies[] = crm_core_contact_ui
 files[] = crm_core_ui.module
 files[] = crm_core_ui.test
 
-; Information added by drupal.org packaging script on 2013-03-22
-version = "7.x-0.91"
+; Information added by drupal.org packaging script on 2013-05-08
+version = "7.x-0.93"
 core = "7.x"
 project = "crm_core"
-datestamp = "1363965325"
+datestamp = "1368036011"
 

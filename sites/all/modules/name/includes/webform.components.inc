@@ -12,7 +12,7 @@ function _webform_defaults_name() {
   $elements = name_element_info();
   $element = $elements['name_element'];
 
-  return array(
+  $component = array(
     'name' => '',
     'form_key' => NULL,
     'pid' => 0,
@@ -28,8 +28,13 @@ function _webform_defaults_name() {
       'minimum_components' => $element['#minimum_components'],
       'components' => $element['#components'],
       'description' => '',
+      'use_real_name' => 0,
     ),
   );
+  foreach (_name_translations() as $key => $label) {
+    $component['extra']['components'][$key]['default_value'] = '';
+  }
+  return $component;
 }
 
 /**
@@ -86,6 +91,16 @@ function _webform_edit_name($name) {
     '#options' => $components,
   );
 
+  $user_field_name = variable_get('name_user_preferred', '');
+  $user_field = $user_field_name ? field_info_instance('user', $user_field_name, 'user') : NULL;
+  $form['extra']['use_real_name'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Use users real name field as default'),
+    '#default_value' => $user_field ? $name['extra']['use_real_name'] : 0,
+    '#description' => t('This option is only available if you have selected a name field to override the users login name.'),
+    '#disabled' => !$user_field,
+  );
+
   foreach ($components as $key => $label) {
     $form['extra']['components'][$key] = array(
       '#type' => 'fieldset',
@@ -101,6 +116,16 @@ function _webform_edit_name($name) {
       '#type' => 'textfield',
       '#title' => t('Label'),
       '#default_value' => $name['extra']['components'][$key]['title'],
+    );
+    // New feature. This prevents PHP notices.
+    if (!isset($name['extra']['components'][$key]['default_value'])) {
+      $name['extra']['components'][$key]['default_value'] = '';
+    }
+    $form['extra']['components'][$key]['default_value'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Default value'),
+      '#default_value' => $name['extra']['components'][$key]['default_value'],
+      '#description' => t('Tokens are allowed. Real name support will override this setting.'),
     );
     $form['extra']['components'][$key]['title_display'] = array(
       '#type' => 'select',
@@ -175,19 +200,59 @@ function _webform_name_options_validate($element, &$form_state) {
  * Implements Webform callback _webform_render_COMPONENT().
  */
 function _webform_render_name($name, $value = NULL, $filter = TRUE) {
+  global $user;
   $enabled_components = array_filter($name['extra']['enabled_components']);
   foreach ($name['extra']['components'] as $key => &$info) {
     if ($key == 'title' || $key == 'generational') {
       $field = array(
-        $key . '_options' => $info['options'],
-        'max_length' => array($key => $info['max_length']),
-        'sort_options' => array($key => $info['sort_options'])
+        'settings' => array(
+          $key . '_options' => $info['options'],
+          'max_length' => array($key => $info['max_length']),
+          'sort_options' => array($key => $info['sort_options']),
+        ),
       );
       $info['options'] = name_field_get_options($field, $key);
     }
     $info['maxlength'] = $info['max_length'];
     if (empty($enabled_components[$key])) {
       $info['exclude'] = TRUE;
+    }
+  }
+  $default_value = array();
+  if (empty($value)) {
+    $found = FALSE;
+    if (!empty($name['extra']['use_real_name'])) {
+      if ($user_field_name = variable_get('name_user_preferred', '')) {
+        name_username_alter_preload($user);
+        if ($items = field_get_items('user', $user, $user_field_name)) {
+          $item = reset($items);
+          $found = TRUE;
+          foreach ($enabled_components as $component_key) {
+            $default_value[$component_key] = isset($item[$component_key]) ? $item[$component_key] : '';
+          }
+        }
+      }
+    }
+    if (!$found) {
+      $token_data = array(
+        'user' => $user,
+      );
+      foreach ($enabled_components as $component_key) {
+        if (!isset($name['extra']['components'][$component_key]['default_value'])) {
+          $name['extra']['components'][$component_key]['default_value'] = '';
+        }
+        $default_value[$component_key] = $name['extra']['components'][$component_key]['default_value'];
+        if (strlen($default_value[$component_key])) {
+          $default_value[$component_key] = token_replace($default_value[$component_key], $token_data, array('clear' => TRUE, 'sanitize' => FALSE));
+        }
+      }
+    }
+
+    foreach ($enabled_components as $component_key) {
+      $max_length = $name['extra']['components'][$component_key]['max_length'];
+      if (drupal_strlen($default_value[$component_key]) > $max_length) {
+        $default_value[$component_key] = drupal_substr($default_value[$component_key], 0, $max_length);
+      }
     }
   }
 
@@ -202,7 +267,7 @@ function _webform_render_name($name, $value = NULL, $filter = TRUE) {
     '#suffix' => '</div>',
     '#minimum_components' => $name['extra']['minimum_components'],
     '#components' => $name['extra']['components'],
-    '#default_value' => empty($value) ? array() : $value,
+    '#default_value' => empty($value) ? $default_value : $value,
   );
 
   return $form_item;

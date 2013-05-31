@@ -140,9 +140,9 @@ function name_theme() {
     'name_element' => array(
       'render element' => 'element',
     ),
-    // Themes an individual name component.
-    'name_component' => array(
-      'variables' => array('value' => NULL, 'component' => NULL, 'markup' => 0, 'modifier' => NULL),
+    // Provides a marker to highlight that the component is required.
+    'name_component_required_marker' => array(
+      'variables' => array('base_element' => NULL, 'component_key' => NULL, 'components' => NULL),
     ),
     // Provides the help for the recognized characters in the name_format()
     // format parameter.
@@ -169,26 +169,55 @@ function theme_name_item($variables) {
 }
 
 /**
+ * Renders a name component value.
+ *
  * This function does not by default sanatise the output unless the markup
  * flag is set. If this is set, it runs the component through check_plain() and
  * wraps the component in a span with the component name set as the class.
  */
-function theme_name_component($variables) {
-  if (empty($variables['value']) || !strlen($variables['value'])) {
+function name_render_component($value, $component_key, $markup, $modifier = NULL) {
+  if (empty($value) || !strlen($value)) {
     return NULL;
   }
-  switch ($variables['modifier']) {
+  switch ($modifier) {
     case 'initial':
-      $value = drupal_substr($variables['value'], 0, 1);
+      $value = drupal_substr($value, 0, 1);
       break;
 
-    default:
-      $value = $variables['value'];
   }
-  if ($variables['markup']) {
-    return '<span class="' . check_plain($variables['component']) . '">' . check_plain($value) . '</span>';
+  if ($markup) {
+    return '<span class="' . check_plain($component_key) . '">' . check_plain($value) . '</span>';
   }
   return $value;
+}
+
+/**
+* Returns HTML for a marker for required name components.
+*
+* @param $variables
+*   An associative array containing:
+*   - element: An associative array containing the properties of the component.
+*
+* @ingroup themeable
+*/
+function theme_name_component_required_marker($variables) {
+  $base_element = $variables['base_element'];
+  $components = $variables['components'];
+  $component_key = $variables['component_key'];
+  $name_translations = _name_translations();
+  $title = empty($base_element['#title']) ? t('Name') : $base_element['#title'];
+  if (!empty($base_element['#allow_family_or_given']) && ($component_key == 'given' || $component_key == 'family')) {
+    $title_attribute = t('!given_title or !family_title is required when entering a !title.', array(
+        '!given_title' => empty($components['given']['title']) ? $name_translations['given'] : $components['given']['title'],
+        '!family_title' => empty($components['family']['title']) ? $name_translations['family'] : $components['family']['title'],
+        '!title' => $title));
+  }
+  else {
+    $component_title = empty($components[$component_key]['title']) ? $name_translations[$component_key] : $components[$component_key]['title'];
+    $title_attribute = t('!component_title is required when entering a !title.', array('!component_title' => $component_title, '!title' => $title));
+  }
+  // Both field label and component labels have already been sanitized.
+  return ' <span class="name-required-component-marker" title="' . $title_attribute . '">' . variable_get('name_component_required_marker', '*') . '</span>';
 }
 
 /**
@@ -374,6 +403,7 @@ function name_element_info() {
       '#element_validate' => array('name_element_validate'),
       '#theme_wrappers' => array('form_element'),
       '#theme' => 'name_element',
+      '#show_component_required_marker' => 0,
       '#default_value' => array(
         'title' => '',
         'given' => '',
@@ -383,6 +413,7 @@ function name_element_info() {
         'credentials' => '',
       ),
       '#minimum_components' => $field_settings['minimum_components'],
+      '#allow_family_or_given' => $field_settings['allow_family_or_given'],
       '#components' => array(
         'title' => array(
           'type' => $instance_settings['title_field'],
@@ -580,7 +611,7 @@ function name_element_expand($element, &$form_state, $complete_form) {
 
   foreach ($parts as $key => $title) {
     if (!isset($components[$key]['exclude'])) {
-      $element[$key] = _name_render_component($components[$key], $key, $element['#value'][$key], isset($min_components[$key]));
+      $element[$key] = _name_render_component($components, $key, $element, isset($min_components[$key]));
       $class = 'name-' . $key . '-wrapper';
       if ($key == 'credentials' && empty($element['#credentials_inline'])) {
         $element[$key]['#prefix'] = '<div class="' . $class
@@ -601,19 +632,47 @@ function name_element_expand($element, &$form_state, $complete_form) {
   return $element;
 }
 
-function _name_render_component($component, $name, $value, $core) {
-  $element = array(
-    '#attributes' => array(
-      'class' => array('name-element name-' . $name . ($core ? ' name-core-component' : '')),
-    ),
-  );
+/**
+ * Helper function to render a component within a name element.
+ *
+ * @param array $components
+ *   Core properties for all components.
+ * @param string $component_key
+ *   The component key of the component that is being rendered.
+ * @param array $base_element
+ *   Base FAPI element that makes up a name element.
+ * @param bool $core
+ *   Flag that indicates that the component is required as part of a valid
+ *   name.
+ * @return array
+ *   The constructed component FAPI structure for a name element.
+ */
+function _name_render_component($components, $component_key, $base_element, $core) {
+  $component = $components[$component_key];
+  $element = array();
+  // Allow other modules to append additional FAPI properties to the element.
+  foreach (element_properties($component) as $key) {
+    $element[$key] = $element[$key];
+  }
+
+  $element['#attributes']['class'][] = 'name-element';
+  $element['#attributes']['class'][] = 'name-' . $component_key;
+
+  if ($core) {
+    $element['#attributes']['class'][] = 'name-core-component';
+  }
   if (isset($component['attributes'])) {
     foreach ($component['attributes'] as $key => $attribute) {
-      if (!isset($element['#attributes'][$key])) {
-        $element['#attributes'][$key] = $attribute;
+      if (isset($element['#attributes'][$key])) {
+        if (is_array($attribute)) {
+          $element['#attributes'][$key] = array_merge($element['#attributes'][$key], $attribute);
+        }
+        else {
+          $element['#attributes'][$key] .= ' ' . $attribute;
+        }
       }
       else {
-        $element['#attributes'][$key] .= ' ' . $attribute;
+        $element['#attributes'][$key] = $attribute;
       }
     }
   }
@@ -623,13 +682,21 @@ function _name_render_component($component, $name, $value, $core) {
     $element['#' . $key] = $component[$key];
   }
 
-  $element['#default_value'] = $value;
+  $element['#default_value'] = $base_element['#value'][$component_key];
   if ($component['type'] == 'select') {
     $element['#options'] = $component['options'];
     $element['#size'] = 1;
   }
   elseif (!empty($component['autocomplete'])) {
     $element['#autocomplete_path'] = $component['autocomplete'];
+  }
+
+  if ($core && !empty($base_element['#show_component_required_marker'])) {
+    $element['#title'] .= theme('name_component_required_marker', array(
+        'components' => $components,
+        'component_key' => $component_key,
+        'base_element' => $base_element,
+    ));
   }
 
   // Enable the title options.
@@ -666,18 +733,30 @@ function name_element_validate($element, &$form_state) {
   $item_components = array();
   foreach (_name_translations() as $key => $title) {
     if (isset($labels[$key]) && !empty($item[$key])) {
-      $item_components[$key] = $item[$key];
+      $item_components[$key] = 1;
     }
   }
+  // Conditionally allow either a single given or family name.
+  if (!empty($element['#allow_family_or_given'])) {
+    // This option is only valid if there are both components.
+    if (isset($labels['given']) && isset($labels['family'])) {
+      if (!empty($item['given']) || !empty($item['family'])) {
+        $item_components['given'] = 1;
+        $item_components['family'] = 1;
+      }
+    }
+  }
+
   if (!$empty && (count($minimum_components) != count(array_intersect_key($minimum_components, $item_components)))) {
     $missing_labels = array_diff_key(array_intersect_key($labels, $minimum_components), $item_components);
     $label = empty($element['#title']) ? (empty($element['#label']) ? 'Field' : $element['#label']) : $element['#title'];
-    form_error($element[key($missing_labels)], t('%name also requires the following parts: %components.',
-      array('%name' => $label, '%components' => implode(', ', $missing_labels))));
+    // Note that field_default_form() has already sanitized #title.
+    form_error($element[key($missing_labels)], t('!name also requires the following parts: <em>!components</em>.',
+      array('!name' => $label, '!components' => implode(', ', $missing_labels))));
   }
 
   if ($empty && $element['#required']) {
-    form_error($element, t('%name is required.', array('%name' => t($element['#title']))));
+    form_error($element, t('<em>!name</em> is required.', array('!name' => t($element['#title']))));
   }
   return $element;
 }
@@ -728,6 +807,15 @@ function _name_component_layout(&$element, $layout = 'default') {
       'generational' => 5,
       'credentials' => 6,
     ),
+    'eastern' => array(
+      'title' => 1,
+      'family' => 2,
+      'given' => 3,
+      'middle' => 4,
+      // 'generational' is removed from the display
+      'generational' => 5,
+      'credentials' => 6,
+    ),
   );
   if (isset($weights[$layout])) {
     foreach ($weights[$layout] as $component => $weight) {
@@ -769,6 +857,9 @@ function name_field_info() {
           'given' => 'given',
           'family' => 'family',
         ),
+        // Allows a given or family component value to filful either both the
+        // minimal components. Allows singular names like "Prince".
+        'allow_family_or_given' => 0,
         'labels' => _name_translations(),
         'max_length' => array(
           'title' => 31,
@@ -821,6 +912,7 @@ function name_field_info() {
         'credentials_inline' => 0,
         'component_css' => '',
         'component_layout' => 'default',
+        'show_component_required_marker' => 0,
       ),
       'property_type' => 'field_item_name',
       'property_callbacks' => array('name_field_property_info_callback'),
@@ -919,8 +1011,8 @@ function _name_field_minimal_component_requirements($element, &$form_state) {
   if (empty($value)) {
     $required_fields = array_intersect_key(_name_translations(), $required_field_set);
     form_set_error(implode('][', $element['#parents']) . '][given]',
-        t('%label must have one of the following components: %components',
-        array('%label' => $element['#title'], '%components' => implode(', ', $required_fields))));
+        t('!label must have one of the following components: %components',
+        array('!label' => $element['#title'], '%components' => implode(', ', $required_fields))));
   }
 }
 
@@ -1291,17 +1383,11 @@ function name_form_field_ui_field_edit_form_alter(&$form, &$form_state, $form_id
 
   // Moves the instance settings into a nicer table.
   if (isset($form['instance']['settings'])) {
-    if (!isset($form['instance']['#pre_render'])) {
-      $form['instance']['#pre_render'] = array();
-    }
     $form['instance']['#pre_render'][] = 'name_field_instance_settings_pre_render';
   }
 
   // Moves the field settings into a nicer table.
   if (isset($form['field']['settings'])) {
-    if (!isset($form['field']['settings']['#pre_render'])) {
-      $form['field']['settings']['#pre_render'] = array();
-    }
     $form['field']['settings']['#pre_render'][] = 'name_field_settings_pre_render';
   }
 }
@@ -1311,9 +1397,6 @@ function name_form_field_ui_field_settings_form_alter(&$form) {
     return;
   }
   if (isset($form['field']['settings'])) {
-    if (!isset($form['field']['settings']['#pre_render'])) {
-      $form['field']['settings']['#pre_render'] = array();
-    }
     $form['field']['settings']['#pre_render'][] = 'name_field_settings_pre_render';
   }
 }
@@ -1602,4 +1685,18 @@ function name_migrate_api() {
     'api' => 2,
   );
   return $api;
+}
+
+/**
+ * Implements hook_features_api().
+ */
+function name_features_api() {
+  return array(
+    'namefield' => array(
+      'name' => t('Name formats'),
+      'default_hook' => 'name_default_formats',
+      'feature_source' => TRUE,
+      'file' => drupal_get_path('module', 'name') . '/includes/name.features.inc',
+    ),
+  );
 }

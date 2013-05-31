@@ -104,6 +104,12 @@ function _name_field_settings_form($field, $instance, $has_data) {
     );
   }
 
+  $form['allow_family_or_given'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Allow a single valid given or family value to fulfill the minimum component requirements for both given and family components.'),
+    '#default_value' => !empty($settings['allow_family_or_given']),
+  );
+
   // TODO - Grouping & grouping sort
   // TODO - Allow reverse free tagging back into the vocabulary.
   $title_options = implode("\n", array_filter(explode("\n", $settings['title_options'])));
@@ -307,6 +313,14 @@ function _name_field_instance_settings_form($field, $instance = NULL) {
     '#description' => t('Use this to override the default CSS used when rendering each component. Use "&lt;none&gt;" to prevent the use of inline CSS.'),
   );
 
+  $items = array(
+    t('The order for Asian names is Family Middle Given Title'),
+    t('The order for Eastern names is Title Family Given Middle'),
+    t('The order for Western names is Title First Middle Surname'),
+  );
+  $layout_description = t('<p>This controls the order of the widgets that are displayed in the form.</p>')
+      . theme('item_list', array('items' => $items))
+      . t('<p>Note that when you select the Asian names format, the Generational field is hidden and defaults to an empty string.</p>');
   $form['component_layout'] = array(
     '#type' => 'radios',
     '#title' => t('Language layout'),
@@ -314,13 +328,16 @@ function _name_field_instance_settings_form($field, $instance = NULL) {
     '#options' => array(
       'default' => t('Western names'),
       'asian' => t('Asian names'),
+      'eastern' => t('Eastern names'),
     ),
-    '#description' => t(
-    'This controls the order of the widgets that are displayed in the form. Note that when you select the !asian format, the !name_generational field is hidden and defaults to an empty string.',
-        array('!name_generational' => t('Generational'), '!asian' => t('Asian names'))
-    ),
+    '#description' => $layout_description,
   );
-
+  $form['show_component_required_marker'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Show component required marker'),
+    '#default_value' => empty($settings['show_component_required_marker']) ? 0 : 1,
+    '#description' => t('Appends an asterisk after the component title if the component is required as part of a complete name.'),
+  );
   $form['credentials_inline'] = array(
     '#type' => 'checkbox',
     '#title' => t('Show the credentials inline'),
@@ -371,11 +388,13 @@ function _name_field_widget_form(&$form, &$form_state, $field, $instance, $langc
     '#label' => $instance['label'],
     '#components' => array(),
     '#minimum_components' => array_filter($fs['minimum_components']),
+    '#allow_family_or_given' => !empty($fs['allow_family_or_given']),
     '#default_value' => isset($items[$delta]) ? $items[$delta] : NULL,
     '#field' => $field,
     '#credentials_inline' => empty($ws['credentials_inline']) ? 0 : 1,
     '#component_css' => empty($ws['component_css']) ? '' : $ws['component_css'],
-    '#component_layout' => empty($ws['component_layout']) ? 'default' : $ws['component_layout']
+    '#component_layout' => empty($ws['component_layout']) ? 'default' : $ws['component_layout'],
+    '#show_component_required_marker' => !empty($ws['show_component_required_marker']),
   );
 
   $components = array_filter($fs['components']);
@@ -454,7 +473,7 @@ function _name_field_get_options($field, $key) {
   // Options could come from multiple sources, filter duplicates.
   $options = array_unique($options);
 
-  if ($fs && isset($fs['sort_options']) && !empty($fs['sort_options'][$key])) {
+  if (isset($fs['sort_options']) && !empty($fs['sort_options'][$key])) {
     natcasesort($options);
   }
   $default = FALSE;

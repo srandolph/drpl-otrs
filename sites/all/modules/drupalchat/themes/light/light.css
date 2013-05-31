@@ -339,6 +339,10 @@
   text-align: left;
   width: 210px;
 }
+#drupalchat .chatboxcontent p a {
+  border: none !important;
+  color: #00e; !important;
+}
 #drupalchat .drupalchatnousers {
   display: block !important;
   font-weight: normal !important;
