@@ -1124,11 +1124,23 @@ server.post(settings.baseAuthPath + settings.contentTokenUrl, setContentToken);
 server.post(settings.baseAuthPath + settings.publishMessageToContentChannelUrl, publishMessageToContentChannel);
 
 // Allow extensions to add routes.
+var path = '';
 for (var i in extensions) {
   if (extensions[i].hasOwnProperty('routes')) {
     console.log('Adding route handlers from extension', extensions[i].routes);
     for (var j = 0; j < extensions[i].routes.length; j++) {
-      server.get(extensions[i].routes[j].path, extensions[i].routes[j].handler);
+      if (extensions[i].routes[j].auth) {
+        path = settings.baseAuthPath + extensions[i].routes[j].path;
+      }
+      else {
+        path = extensions[i].routes[j].path;
+      }
+      if (extensions[i].routes[j].type == 'post') {
+        server.post(path, extensions[i].routes[j].handler);
+      }
+      else {
+        server.get(path, extensions[i].routes[j].handler);
+      }
     }
   }
 }
